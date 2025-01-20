@@ -1,0 +1,105 @@
+import com.fasterxml.jackson.databind.ObjectMapper;
+import org.apache.http.client.methods.HttpGet;
+import org.apache.http.impl.client.HttpClients;
+import org.apache.http.impl.client.CloseableHttpClient;
+import org.apache.http.impl.client.HttpClientBuilder;
+import org.apache.http.client.HttpResponseException;
+import org.apache.http.HttpResponse;
+import org.apache.commons.io.FileUtils;
+
+import javax.xml.bind.JAXBContext;
+import javax.xml.bind.JAXBException;
+import javax.xml.bind.Unmarshaller;
+import java.io.File;
+import java.io.IOException;
+import java.net.URI;
+import java.util.List;
+import java.util.Map;
+
+public class MiddlewareConnector {
+    
+    private static final String EXCHANGE_RATE_API = "https://api.exchangeratesapi.io/latest";
+    private static final String EMPLOYEE_INFO_API = "https://api.company.com/employee-info";
+    private static final ObjectMapper objectMapper = new ObjectMapper();
+    
+    // Read the SAP Concur SAE 3.0 XML File
+    public static String readSAPConcurFile(String filePath) throws IOException {
+        File file = new File(filePath);
+        return FileUtils.readFileToString(file, "UTF-8");
+    }
+
+    // Parse the SAP Concur SAE 3.0 XML to Java Object
+    public static SAPConcurData parseSAPConcurXML(String xmlData) throws JAXBException {
+        JAXBContext jaxbContext = JAXBContext.newInstance(SAPConcurData.class);
+        Unmarshaller unmarshaller = jaxbContext.createUnmarshaller();
+        return (SAPConcurData) unmarshaller.unmarshal(new File(xmlData));
+    }
+
+    // Fetch exchange rates for currency conversion
+    public static Map<String, Object> getExchangeRates() throws IOException {
+        try (CloseableHttpClient httpClient = HttpClients.createDefault()) {
+            HttpGet request = new HttpGet(EXCHANGE_RATE_API);
+            HttpResponse response = httpClient.execute(request);
+            if (response.getStatusLine().getStatusCode() != 200) {
+                throw new HttpResponseException(response.getStatusLine().getStatusCode(), "Failed to get exchange rates.");
+            }
+            return objectMapper.readValue(response.getEntity().getContent(), Map.class);
+        }
+    }
+
+    // Fetch Employee Information from API
+    public static Map<String, Object> getEmployeeInfo(String employeeId) throws IOException {
+        try (CloseableHttpClient httpClient = HttpClients.createDefault()) {
+            HttpGet request = new HttpGet(EMPLOYEE_INFO_API + "/" + employeeId);
+            HttpResponse response = httpClient.execute(request);
+            if (response.getStatusLine().getStatusCode() != 200) {
+                throw new HttpResponseException(response.getStatusLine().getStatusCode(), "Failed to get employee info.");
+            }
+            return objectMapper.readValue(response.getEntity().getContent(), Map.class);
+        }
+    }
+
+    // Write the Combined Output to JSON file
+    public static void writeCombinedOutput(String filePath, Object data) throws IOException {
+        objectMapper.writerWithDefaultPrettyPrinter().writeValue(new File(filePath), data);
+    }
+
+    public static void main(String[] args) {
+        try {
+            // Step 1: Read and parse the SAP Concur SAE 3.0 XML data
+            String filePath = "path_to_sae_3_0_file.xml";
+            String xmlData = readSAPConcurFile(filePath);
+            SAPConcurData data = parseSAPConcurXML(xmlData);
+            
+            // Step 2: Fetch and transform data from external APIs
+            Map<String, Object> exchangeRates = getExchangeRates();
+            System.out.println("Exchange Rates: " + exchangeRates);
+            
+            // Example: Fetch employee info for a given employee ID
+            String employeeId = "EMP123";
+            Map<String, Object> employeeInfo = getEmployeeInfo(employeeId);
+            System.out.println("Employee Info: " + employeeInfo);
+            
+            // Step 3: Transform data from SAP Concur and external API to a clean schema
+            CleanedData cleanedData = transformData(data, exchangeRates, employeeInfo);
+            
+            // Step 4: Write the cleaned and transformed data to an output file
+            writeCombinedOutput("combined_output.json", cleanedData);
+            System.out.println("Transformation complete. Output saved to combined_output.json");
+            
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+    }
+
+    // Method to transform data from SAP Concur and APIs into a clean schema
+    public static CleanedData transformData(SAPConcurData concurData, Map<String, Object> exchangeRates, Map<String, Object> employeeInfo) {
+        // Example transformation (simplified, extend as needed)
+        CleanedData cleanedData = new CleanedData();
+        cleanedData.setTransactionId(concurData.getTransactionId());
+        cleanedData.setAmount(concurData.getAmount() * (Double) exchangeRates.get("USD")); // Apply currency conversion
+        cleanedData.setEmployeeInfo(employeeInfo);
+        
+        return cleanedData;
+    }
+}
